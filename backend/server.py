@@ -146,23 +146,21 @@ app.include_router(invest.router)
 
 @app.get("/docs", include_in_schema=False)
 async def custom_swagger_ui():
-    from fastapi.openapi.docs import get_swagger_ui_html
-    return get_swagger_ui_html(
-        openapi_url="/openapi.json",
-        title="Moon Hunters API",
-        swagger_js_url="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js",
-        swagger_css_url="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css",
-    )
-
-
-@app.get("/redoc", include_in_schema=False)
-async def custom_redoc():
-    from fastapi.openapi.docs import get_redoc_html
-    return get_redoc_html(
-        openapi_url="/openapi.json",
-        title="Moon Hunters API",
-        redoc_js_url="https://unpkg.com/redoc@next/bundles/redoc.standalone.js",
-    )
+    from fastapi.responses import HTMLResponse
+    html = """<!DOCTYPE html>
+<html><head><title>Moon Hunters API</title><meta charset="utf-8"/>
+<link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.18.2/swagger-ui.css"/>
+</head><body>
+<div id="swagger-ui"></div>
+<script src="https://unpkg.com/swagger-ui-dist@5.18.2/swagger-ui-bundle.js"></script>
+<script src="https://unpkg.com/swagger-ui-dist@5.18.2/swagger-ui-standalone-preset.js"></script>
+<script>
+window.onload=function(){
+  SwaggerUIBundle({url:window.location.origin+'/openapi.json',dom_id:'#swagger-ui',deepLinking:true,
+  presets:[SwaggerUIBundle.presets.apis,SwaggerUIStandalonePreset],layout:'StandaloneLayout'});
+};
+</script></body></html>"""
+    return HTMLResponse(content=html)
 
 app.add_middleware(
     CORSMiddleware,
