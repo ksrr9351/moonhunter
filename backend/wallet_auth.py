@@ -113,7 +113,7 @@ def verify_wallet_signature(
             
             if request_host:
                 if msg_domain != request_host and not request_host.endswith('.' + msg_domain):
-                    if not msg_domain.endswith('.replit.dev') and not msg_domain.endswith('.replit.app') and not msg_domain.endswith('.vercel.app') and not msg_domain.startswith('localhost'):
+                    if not msg_domain.endswith('.replit.dev') and not msg_domain.endswith('.replit.app') and not msg_domain.endswith('.vercel.app') and not msg_domain.endswith('.duckdns.org') and not msg_domain.startswith('localhost'):
                         logger.warning(f"[SIWE] Domain {msg_domain} doesn't match request host {request_host}")
                         return False
             
