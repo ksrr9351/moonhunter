@@ -170,9 +170,9 @@ export const WalletAuthProvider = ({ children }) => {
           // Check if actually connected despite the error (Trust Wallet quirk)
           setTimeout(() => {
             if (isConnected && address && !loginInProgress.current && !isAuthenticated) {
-              console.log('[REOWN EVENT] Connected despite auth error! Starting direct auth...');
+              console.log('[REOWN EVENT] Connected despite auth error! Starting SIWE auth...');
               lastProcessedAddress.current = address;
-              handleDirectConnect(address);
+              handleSIWEAuth(address);
             }
           }, 1000);
         }
@@ -232,8 +232,8 @@ export const WalletAuthProvider = ({ children }) => {
           
           forceCloseModal();
           
-          console.log('[DIRECT] Starting direct wallet authentication for:', address.slice(0, 10) + '...');
-          handleDirectConnect(address);
+          console.log('[SIWE] Starting SIWE wallet authentication for:', address.slice(0, 10) + '...');
+          handleSIWEAuth(address);
         }
       }, 500);
     }
@@ -289,9 +289,9 @@ export const WalletAuthProvider = ({ children }) => {
       // Clear any pending SIWE state (we use direct connect now)
       localStorage.removeItem('pending_siwe');
       
-      // If wallet is connected but no valid token, authenticate with direct connect
-      console.log('[AUTO] Wallet connected after reload, starting direct authentication...');
-      handleDirectConnect(address);
+      // If wallet is connected but no valid token, authenticate with SIWE
+      console.log('[AUTO] Wallet connected after reload, starting SIWE authentication...');
+      handleSIWEAuth(address);
     };
     
     // Delay slightly to allow wallet state to stabilize
@@ -654,9 +654,9 @@ Issued At: ${issuedAt}`;
         // Wait briefly and check if we actually got connected
         await new Promise(resolve => setTimeout(resolve, 1500));
         if (isConnected && address && !loginInProgress.current && !isAuthenticated) {
-          console.log('[WALLET] Wallet IS connected despite error! Proceeding with direct auth...');
+          console.log('[WALLET] Wallet IS connected despite error! Proceeding with SIWE auth...');
           lastProcessedAddress.current = address;
-          handleDirectConnect(address);
+          handleSIWEAuth(address);
           return;
         }
         console.log('[WALLET] Wallet not connected. User may have rejected or closed the modal.');
