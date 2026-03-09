@@ -6,8 +6,8 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    command: sh -c "echo 'moonhunter.duckdns.org { reverse_proxy backend:8000 }' > /etc/caddy/Caddyfile && caddy run --config /etc/caddy/Caddyfile"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
