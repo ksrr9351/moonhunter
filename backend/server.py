@@ -41,7 +41,12 @@ logger = logging.getLogger(__name__)
 
 validate_environment()
 
-app = FastAPI(title="Moon Hunters API", version="1.0.0")
+app = FastAPI(
+    title="Moon Hunters API",
+    version="1.0.0",
+    docs_url=None,
+    redoc_url=None,
+)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
@@ -137,6 +142,27 @@ app.include_router(events.router)
 app.include_router(analytics.router)
 app.include_router(intelligence.router)
 app.include_router(invest.router)
+
+
+@app.get("/docs", include_in_schema=False)
+async def custom_swagger_ui():
+    from fastapi.openapi.docs import get_swagger_ui_html
+    return get_swagger_ui_html(
+        openapi_url="/openapi.json",
+        title="Moon Hunters API",
+        swagger_js_url="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js",
+        swagger_css_url="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css",
+    )
+
+
+@app.get("/redoc", include_in_schema=False)
+async def custom_redoc():
+    from fastapi.openapi.docs import get_redoc_html
+    return get_redoc_html(
+        openapi_url="/openapi.json",
+        title="Moon Hunters API",
+        redoc_js_url="https://unpkg.com/redoc@next/bundles/redoc.standalone.js",
+    )
 
 app.add_middleware(
     CORSMiddleware,
