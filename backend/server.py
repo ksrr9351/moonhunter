@@ -109,6 +109,17 @@ async def health_check():
     except Exception:
         db_status = "disconnected"
 
+    redis_status = "disabled"
+    try:
+        from core.redis_client import _redis
+        if _redis:
+            await asyncio.wait_for(_redis.ping(), timeout=2.0)
+            redis_status = "connected"
+    except asyncio.TimeoutError:
+        redis_status = "timeout"
+    except Exception:
+        redis_status = "disconnected"
+
     ws_connections = price_streaming_service.get_connection_count()
 
     if db_status == "connected":
@@ -124,6 +135,7 @@ async def health_check():
         "environment": ENV,
         "demo_mode": DEMO_MODE,
         "database": db_status,
+        "redis": redis_status,
         "websocket_connections": ws_connections,
         "streaming_active": price_streaming_service.is_streaming,
     }
