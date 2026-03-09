@@ -1,0 +1,223 @@
+Objective
+Complete rebuild of the Invest section — delete all old code (Blue Chip, DeFi Core, investment plans) and create a fresh Dump Opportunities marketplace. When a coin dumps, it appears as a buyable opportunity for 1 hour. Users buy/sell via Approach 1: Fee Proxy Smart Contract — SC sits between user wallet and 1inch DEX, takes 1-2% platform fee on every trade, then routes the swap through 1inch for best price and deep liquidity. Track positions with real-time P&L on both Invest page and Dashboard. Add Stop-Loss/Take-Profit, multi-chain support (Ethereum + Polygon + Arbitrum + BSC), and P&L reports with CSV/PDF export.
+
+Smart Contract Architecture: Approach 1 — Fee Proxy Contract
+How it works:
+
+User Wallet → Moon Hunters Fee Proxy SC (takes 1-2% fee) → 1inch Router (actual swap) → Tokens to User
+Buy Flow:
+
+User clicks "Buy" on a dump opportunity
+User approves USDT spending to Moon Hunters SC
+SC receives USDT → deducts platform fee (e.g., 2%) → sends remaining to 1inch for swap
+1inch swaps USDT → target token → token goes directly to user's wallet
+Fee goes to Moon Hunters treasury wallet
+Sell Flow:
+
+User clicks "Sell" on their position
+User approves token spending to Moon Hunters SC
+SC receives token → sends to 1inch for swap → gets USDT back
+SC deducts fee from USDT → sends remaining to user's wallet
+Fee goes to treasury
+SC Key Functions:
+
+buyToken(address token, uint256 usdtAmount, uint256 minOutput, bytes swapData) — Buy via 1inch with fee + slippage protection
+sellToken(address token, uint256 tokenAmount, uint256 minUsdtOutput, bytes swapData) — Sell via 1inch with fee + slippage protection
+setFeePercent(uint256 fee) — Owner adjusts fee (max 5% hardcoded cap)
+withdrawFees() — Transfer collected fees to treasury
+pause() / unpause() — Emergency stop
+recoverTokens(address token, uint256 amount) — Recover accidentally sent tokens
+addWhitelistedToken(address) / removeWhitelistedToken(address) — Optional token whitelist
+SC Security Features:
+
+ReentrancyGuard (OpenZeppelin) on buy/sell
+Slippage protection via minOutputAmount
+Max fee cap (5%) hardcoded — owner cannot exceed
+Event logging (BuyExecuted, SellExecuted, FeeCollected, FeeUpdated, Paused/Unpaused)
+Emergency token recovery
+Optional token whitelist
+Why 1inch (not own liquidity):
+
+No capital needed for liquidity pools
+200+ DEXes aggregated = best price always
+Any token support — whatever dumps, it's tradeable
+Battle-tested, handles millions of trades daily
+Multi-chain deployment: Same SC code deployed on ETH, Polygon, Arbitrum, BSC — each chain has its own SC address + 1inch router.
+
+Context
+Delete: frontend/src/config/investmentPlans.js, old InvestPage.jsx code, references in ARCHITECTURE.md/README.md
+Keep: SwapModal.jsx (will be adapted), dexService.js (will be extended), portfolio_engine.py
+Backend dump detection already works: fast_movers_detector.py (≥1.5% dumps/1h), dump_detection_engine.py (≥5% dumps with AI)
+Trading bot already has SL/TP in trading_bot.py with position_triggers collection — but only does virtual closes, needs real DEX execution
+Backend already supports 7 chains in dex_service.py (ETH, BSC, Polygon, Arbitrum, Optimism, Avalanche, Base); frontend only shows 3 (ETH, Polygon, Arbitrum)
+User will provide SC Solidity code later — we build the full integration architecture now (1inch direct as fallback until SC deployed)
+Tasks
+T001: Delete Old Invest Page Code & Config
+Blocked By: []
+Details:
+Delete frontend/src/config/investmentPlans.js (Blue Chip, DeFi Core, Ethereum Only, L2 Basket plans)
+Completely clear InvestPage.jsx — remove all old code, create empty shell for rebuild
+Remove investment plan references from ARCHITECTURE.md and README.md
+Files: frontend/src/config/investmentPlans.js, frontend/src/components/InvestPage.jsx, ARCHITECTURE.md, README.md
+Acceptance: No traces of old investment plans remain
+T002: Backend — Dump Opportunities API with 1-Hour Active Window
+Blocked By: []
+Details:
+Create new router backend/routers/invest.py with endpoint GET /api/invest/opportunities
+Combine dump signals from fast_movers_detector + dump_detection_engine
+Each opportunity active for 1 hour from detection, auto-expires via MongoDB TTL index on expires_at
+Store in dump_opportunities collection with fields: symbol, name, current_price, dump_percentage, detected_at, expires_at, market_cap, volume_24h, logo, risk_score, ai_recommendation, reason, chain_id
+Modify fast_movers_detector.py: when a dump is detected, auto-insert into dump_opportunities collection
+Return only non-expired opportunities sorted by dump magnitude (biggest dumps first)
+Include current live price from market_provider cache (not stale detection price)
+Register router in server.py
+Files: new backend/routers/invest.py, backend/fast_movers_detector.py, backend/server.py, backend/core/indexes.py
+Acceptance: Endpoint returns live dump opportunities; expired ones auto-removed by MongoDB TTL
+T003: Backend — Position Tracking & Real-Time P&L Endpoints
+Blocked By: []
+Details:
+Add to backend/routers/invest.py:
+GET /api/invest/positions — user's active positions with real-time P&L:
+Per position: symbol, name, logo, entry_price, current_price, quantity, invested_amount, current_value, unrealized_pnl, pnl_percentage, bought_at, tx_hash, chain_id, stop_loss_price, take_profit_price
+Current prices from market_provider cache
+GET /api/invest/summary — aggregate stats for dashboard:
+total_invested, total_current_value, total_pnl, total_pnl_percentage, active_positions_count, best_performer (symbol + pnl%), worst_performer
+POST /api/invest/record-buy — record a buy (symbol, entry_price, quantity, tx_hash, chain_id, fee_amount)
+Leverage existing portfolio_engine.py and ai_positions collection
+Files: backend/routers/invest.py, backend/portfolio_engine.py
+Acceptance: After a buy, position appears with live P&L; summary endpoint feeds the dashboard
+T004: Backend — Stop-Loss / Take-Profit Integration
+Blocked By: [T003]
+Details:
+Add POST /api/invest/positions/{position_id}/triggers — set SL/TP for a position
+Accepts: stop_loss_percent (default 10%), take_profit_percent (default 15%)
+Calculates absolute prices from entry_price
+Stores in existing position_triggers collection
+Add DELETE /api/invest/positions/{position_id}/triggers — cancel SL/TP
+Modify trading_bot.py check_position_triggers(): when SL/TP hits, use close_position_with_dex (real on-chain sell via 1inch, later via SC) instead of virtual close_position
+Return trigger status in positions endpoint (has_stop_loss, has_take_profit, sl_price, tp_price)
+Files: backend/routers/invest.py, backend/trading_bot.py, backend/portfolio_engine.py
+Acceptance: User can set SL/TP on any position; bot auto-sells when price target hit
+T005: Backend — Multi-Chain Dump Detection & BSC Support
+Blocked By: [T002]
+Details:
+Extend dump opportunities to include chain info — which chains the token is tradeable on
+Add BSC (chain 56) to frontend supported chains alongside existing Ethereum (1), Polygon (137), Arbitrum (42161)
+Add BSC common tokens to dex_service.py COMMON_TOKENS (WBNB, USDT, USDC, CAKE, etc.)
+Add BSC to frontend WalletAuthContext.jsx SUPPORTED_CHAINS and SwapModal chain options
+Add BSC network addition details for wallet_addEthereumChain
+Each dump opportunity card shows which chain(s) are available for buying
+Files: backend/dex_service.py, frontend/src/context/WalletAuthContext.jsx, frontend/src/components/SwapModal.jsx
+Acceptance: Users can buy dumped coins on ETH, Polygon, Arbitrum, and BSC
+T006: Backend — P&L Reports with CSV/PDF Export
+Blocked By: [T003]
+Details:
+Add GET /api/invest/reports/summary?period=weekly|monthly|all — P&L report data:
+Period start/end, total trades, winning/losing trades, total P&L, best/worst trade, average hold time
+Per-position breakdown: symbol, entry_date, entry_price, exit_date (if closed), exit_price, quantity, realized_pnl, status
+Add GET /api/invest/reports/export?format=csv|pdf&period=weekly|monthly|all:
+CSV: Standard comma-separated with headers (Date, Symbol, Type, Entry Price, Exit Price, Quantity, P&L, Fee, TX Hash)
+PDF: Formatted report with Moon Hunters branding, summary section + detailed transactions table
+Use Python csv module for CSV, reportlab for PDF generation
+Files: new backend/report_generator.py, backend/routers/invest.py
+Acceptance: User can download CSV and PDF reports of their trading history
+T007: Frontend — New Invest Page with Dump Opportunities
+Blocked By: [T001, T002, T003, T004, T005]
+Details:
+Header section: "Dump Opportunities" title, subtitle "AI-detected price drops — buy the dip before recovery", Available USDT balance
+Chain Filter: Tabs/buttons to filter by chain (All, Ethereum, Polygon, Arbitrum, BSC)
+Opportunities Grid: Cards for each active dump:
+Coin logo, name, symbol, chain badge
+Current price + dump % (red badge)
+Live countdown timer (remaining time from 1hr, shows "Expires in 42m 15s")
+Risk level badge (Low/Moderate/High)
+AI recommendation text
+"Buy Now" button (green, prominent)
+Card: dark glass with red/orange urgency accents, pulsing border when <10 min left
+Empty State: "Market is stable — no dump opportunities right now. We'll alert you when one appears." with subtle animation
+Buy Modal (new component, replaces old plan-based flow):
+Coin details, current price, dump info
+USDT amount input with estimated tokens received
+Chain selector (which chain to buy on)
+Stop-Loss / Take-Profit toggle with percentage inputs (default 10% SL, 15% TP)
+Platform fee display: "Moon Hunters Fee: 2% ($X.XX)" — visible, transparent
+"Confirm Buy" → SC buyToken() call (falls back to 1inch direct until SC deployed)
+Transaction status: pending → confirming → success with tx hash link
+My Positions Section (below opportunities):
+Active holdings with real-time P&L
+Each row: coin logo, symbol, chain badge, buy price, current price, quantity, P&L ($ and %), SL/TP status, bought date
+Green for profit, red for loss, live updating
+"Set SL/TP" button → opens SL/TP config modal
+"Sell" button → SC sellToken() call (falls back to 1inch direct until SC deployed)
+Expandable detail: tx hash link (links to etherscan/polygonscan/etc.), entry details, fee paid
+Export Button: "Download Report" dropdown → CSV or PDF
+Files: frontend/src/components/InvestPage.jsx, new frontend/src/services/investService.js
+Acceptance: Fresh invest page with live dumps, buy/sell flow via SC (or 1inch fallback), positions with P&L, SL/TP controls, export
+T008: Frontend — Dashboard Integration
+Blocked By: [T003]
+Details:
+Update DynamicDashboard.jsx to fetch from /api/invest/summary
+Portfolio Value: total current value of all active positions (real, from actual trades)
+Total ROI: real P&L % from actual entry vs current prices
+Active Portfolios: count of active positions
+Portfolio Performance chart: real data points from position history
+Files: frontend/src/components/DynamicDashboard.jsx
+Acceptance: Dashboard reflects real investment data from trades
+T009: Smart Contract Fee Proxy — Integration Architecture
+Blocked By: []
+Details:
+Approach 1: Fee Proxy Contract — SC sits between user and 1inch, takes platform fee on every trade
+Add config in backend/core/config.py:
+MOONHUNTERS_CONTRACT_ADDRESS — per-chain SC addresses (dict: chain_id → address), placeholder until deployed
+MOONHUNTERS_FEE_PERCENT — platform fee percentage (default 2%)
+MOONHUNTERS_TREASURY_ADDRESS — wallet that receives fees
+MOONHUNTERS_MAX_FEE_PERCENT — hardcoded max fee cap (5%)
+Create frontend/src/services/contractService.js (Fee Proxy SC interface):
+buyToken(tokenAddress, usdtAmount, minOutputAmount, swapData, chainId) — calls SC buyToken():
+Approve USDT to SC address
+SC deducts fee → routes to 1inch → tokens to user wallet
+Reverts if output < minOutputAmount (slippage protection)
+sellToken(tokenAddress, tokenAmount, minUsdtOutput, swapData, chainId) — calls SC sellToken():
+Approve token to SC address
+SC routes to 1inch → gets USDT → deducts fee → USDT to user
+Reverts if USDT output < minUsdtOutput (slippage protection)
+estimateFee(amount) — calculates fee amount (amount * feePercent / 100)
+getContractAddress(chainId) — returns SC address for the chain
+isContractDeployed(chainId) — checks if SC exists on this chain
+Fallback: if SC not deployed → use 1inch direct (no fee collected)
+All functions use ethers.js + user's connected wallet provider
+Add to backend/dex_service.py:
+generate_swap_data_for_sc(chain_id, src_token, dst_token, amount, sc_address) — generates 1inch calldata that the SC will use internally
+Create frontend/src/config/contractConfig.js:
+SC addresses per chain (placeholder until deployed)
+SC ABI (placeholder until SC code provided — will include all security features below)
+Fee percentage + max fee cap
+Treasury address
+SC Security Features (to be included in Solidity contract):
+1. Reentrancy Protection: Use OpenZeppelin ReentrancyGuard on buyToken/sellToken — prevents attack between external calls
+2. Slippage Protection: minOutputAmount parameter on both buy and sell — user gets guaranteed minimum tokens, prevents front-running/sandwich attacks
+3. Max Fee Cap: Hardcoded MAX_FEE = 500 (5%) in SC — setFeePercent() reverts if fee > MAX_FEE, even owner cannot exceed this, builds user trust
+4. Token Whitelist (Optional): addWhitelistedToken(address) / removeWhitelistedToken(address) — owner can optionally restrict to verified tokens only, whitelistEnabled toggle (default: off, any token allowed)
+5. Event Logging: Emit events on every action for transparency and frontend tracking:
+event BuyExecuted(address user, address token, uint256 amountIn, uint256 amountOut, uint256 fee)
+event SellExecuted(address user, address token, uint256 amountIn, uint256 amountOut, uint256 fee)
+event FeeCollected(address token, uint256 amount)
+event FeeUpdated(uint256 oldFee, uint256 newFee)
+event Paused(address by) / event Unpaused(address by)
+6. Emergency Token Recovery: recoverTokens(address token, uint256 amount) — owner-only function to recover tokens accidentally sent directly to SC (not from trades), prevents permanent loss of user funds
+Add event listeners in contractService.js to track BuyExecuted/SellExecuted events for real-time UI updates
+Files: new frontend/src/services/contractService.js, new frontend/src/config/contractConfig.js, backend/core/config.py, backend/dex_service.py
+Acceptance: Full SC integration architecture ready with all 6 security features; 1inch direct works now; one-line switch to SC when deployed
+T010: Testing & Polish
+Blocked By: [T007, T008, T009]
+Details:
+E2E test: Invest page loads (with or without dump opportunities)
+E2E test: Dashboard shows correct stats
+E2E test: Navigation works, no console errors
+Verify countdown timer works
+Verify positions section renders
+Verify chain filter works
+Verify export button triggers download
+Update replit.md with new architecture (Invest section, SC integration, multi-chain, SL/TP, reports)
+Files: N/A
+Acceptance: All flows work end-to-end without errors

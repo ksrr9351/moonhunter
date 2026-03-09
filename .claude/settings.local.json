@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir D:Replit-Moon-hunters-mainfrontendsrc /b /s)",
+      "Bash(findstr -v node_modules)",
+      "Bash(findstr -i \"wallet\\\\|balance\")",
+      "Bash(dir \"D:\\\\Replit-Moon-hunters-main\\\\frontend\" /b)"
+    ]
+  }
+}

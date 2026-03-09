@@ -1,0 +1,80 @@
+<analysis>
+The trajectory documents an extensive development and debugging process for the Moon Hunters application. The initial task was fixing a blank screen caused by Vite configuration issues and incorrect React component imports. The core of the work revolved around implementing and repeatedly fixing a Sign-In with Ethereum (SIWE) flow using Reown AppKit.
+
+A persistent and complex problem was an incorrect redirect after login, where users were sent to a Reown page instead of the app's . The engineer attempted multiple solutions, including aggressive frontend redirect logic, before undertaking a complete auth system refactor based on detailed user specifications. This refactor involved creating a new backend endpoint, a global auth context, and updating numerous components. However, this introduced a critical conflict between old and new Reown configurations, which had to be meticulously debugged and consolidated.
+
+Subsequent tasks involved fixing a series of cascading bugs, including an infinite reload loop on the dashboard, blank pages for sub-features (, ), and an Invalid or expired token error for AI features. These were traced to inconsistent token handling, components using deprecated auth contexts, and a backend JWT signing mismatch, all of which were resolved.
+
+Most recently, the engineer implemented a Fast Market Movements feature, which was then reverted from the main dashboard and re-implemented on a new Top Gainers page, complete with a Smart Alerts system. The final user message reports that this new page is showing no information, which appears to be the expected empty state as the backend data collection process has just begun.
+
+The user's primary language is English. The next agent must respond in English.
+</analysis>
+
+<product_requirements>
+The Moon Hunters application is an AI-powered cryptocurrency investment platform. The core product requirement is a seamless and secure Sign-In with Ethereum (SIWE) authentication flow using Reown AppKit.
+
+**User Flow & Authentication:**
+1.  Upon clicking Connect Wallet, the user should see a modal with multiple authentication options (MetaMask, WalletConnect, Email, Social).
+2.  After a successful login, the user must be redirected to the  page. The application must handle the UI state change instantly, showing the user's wallet address in the header.
+3.  A logged-in user must be able to visit the homepage without being forcefully redirected to the dashboard.
+
+**Core Features:**
+*   **Dynamic Dashboard:** A feature-rich interface displaying portfolio value, ROI, performance graphs, and top cryptocurrency market data fetched from a CoinMarketCap API.
+*   **Top Gainers & Fast Movers:** A dedicated page () to display cryptocurrencies experiencing significant price movements (pumps/dumps), detected by a backend cron job.
+*   **Smart Alerts:** A system within the Top Gainers page allowing users to configure email alerts for market movements exceeding a certain threshold.
+</product_requirements>
+
+<key_technical_concepts>
+- **Frontend:** React, Vite, , Tailwind CSS, shadcn/ui
+- **Backend:** FastAPI (Python), 
+- **Database:** MongoDB (with  for async access)
+- **Authentication:** Reown AppKit, SIWE, JWT (JSON Web Tokens)
+- **API Communication:** Axios, CoinMarketCap API, Perplexity AI API
+- **Real-time Features:** Background cron job for price movement detection ()
+- **UI/Charting:** Recharts, Framer Motion
+</key_technical_concepts>
+
+<code_architecture>
+The application uses a monorepo structure with distinct  and  directories.
+
+
+
+-   ****
+    -   **Importance:** The main FastAPI application file. It defines all API routes, including authentication (), crypto data (), AI recommendations (), and the new fast movers/alerts endpoints (, ).
+    -   **Changes:** Heavily modified to add new endpoints for Reown JWT-based login, alert settings, and fast movers. Includes startup logic to launch the  background task.
+
+-   ****
+    -   **Importance:** A new module responsible for the Fast Market Movements feature. It contains a class that runs as a background task.
+    -   **Changes:** Created to periodically fetch crypto prices from the , compare them with previously stored prices in MongoDB, identify significant movements (pumps/dumps), and save them to the  collection.
+
+-   ****
+    -   **Importance:** The single source of truth for frontend authentication state. It manages the user's session, token, wallet address, and handles the entire Reown login logic.
+    -   **Changes:** This file underwent a massive refactor. It was completely rewritten to handle a robust login flow: triggering the Reown modal, handling the  callback, calling the backend to get a valid JWT, storing the token, and updating the global state. All previous conflicting logic was removed.
+
+-   ****
+    -   **Importance:** The main landing page after a user logs in. It displays an overview of the user's portfolio, market data, and quick actions.
+    -   **Changes:** Fixed multiple critical rendering bugs, including a  error by aligning the data structure with the backend response. The Fast Market Movements section was added and subsequently removed from this file.
+
+-   ****
+    -   **Importance:** A new page created to house the Fast Market Movements and Smart Alerts features.
+    -   **Changes:** Created from scratch. It fetches data from  and renders the  and  components, with styling that matches the application's theme.
+
+-   ****
+    -   **Importance:** The root component that defines the application's routing structure.
+    -   **Changes:** Updated to wrap the entire application in the  and add the new route for  pointing to .
+</code_architecture>
+
+<pending_tasks>
+- **Verify Top Gainers Data Population:** The user has reported that the Top Gainers page shows no information. The current state is an expected empty state because the backend needs time to collect data. The pending task is to confirm that the page correctly displays data once price movements are detected by the backend cron job.
+</pending_tasks>
+
+<current_work>
+The most recent task was the implementation of a new Top Gainers feature, which involved several key steps:
+1.  **Backend Development:** A cron job () was created to run every minute, fetching crypto prices, comparing them to previous values stored in MongoDB, and identifying significant movements (±5%). New API endpoints (, ) were added to  to expose this data and manage user alert preferences.
+2.  **Frontend Development:** A new page component, , was created and linked in the main navigation and routing (). This page was designed to display the Fast Market Movements and a new Smart Alerts component, matching the application's existing dark, neon, glassmorphism theme.
+3.  **The Issue:** The user has reported that the  is not showing any information, as seen in their last screenshot. My analysis confirms the page is rendering correctly but is showing the No fast movements detected yet empty state. This is the expected behavior because the backend detection system has only just been started and requires at least two data points (a 60-second interval) to calculate a price movement. The system is working as designed, but hasn't had enough time to generate data to display.
+</current_work>
+
+<optional_next_step>
+I will verify that the Fast Market Movements section on the  page populates with data after waiting a few minutes for the backend cron job to run and detect price changes.
+</optional_next_step>

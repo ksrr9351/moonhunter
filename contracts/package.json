@@ -1,0 +1,23 @@
+{
+  "name": "moonhunters-fee-proxy",
+  "version": "1.0.0",
+  "description": "Moon Hunters Fee Proxy Smart Contract - DEX swap routing with fee collection",
+  "scripts": {
+    "compile": "npx hardhat compile",
+    "deploy:sepolia": "npx hardhat run scripts/deploy.js --network sepolia",
+    "deploy:ethereum": "npx hardhat run scripts/deploy.js --network ethereum",
+    "deploy:polygon": "npx hardhat run scripts/deploy.js --network polygon",
+    "deploy:arbitrum": "npx hardhat run scripts/deploy.js --network arbitrum",
+    "deploy:bsc": "npx hardhat run scripts/deploy.js --network bsc",
+    "setup": "npx hardhat run scripts/setup.js",
+    "test": "npx hardhat test"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.1.0"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.22.0",
+    "dotenv": "^16.4.0"
+  }
+}
