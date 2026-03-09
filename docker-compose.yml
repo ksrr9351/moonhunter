@@ -1,10 +1,24 @@
 services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: moonhunters-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+
   backend:
     build: ./backend
     container_name: moonhunters-api
     restart: unless-stopped
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     environment:
       - ENV=production
       - SESSION_SECRET=${SESSION_SECRET}
@@ -23,3 +37,7 @@ services:
       - SMTP_SERVER=${SMTP_SERVER}
       - CORS_ORIGINS=${CORS_ORIGINS}
       - REDIS_URL=${REDIS_URL}
+
+volumes:
+  caddy_data:
+  caddy_config:
