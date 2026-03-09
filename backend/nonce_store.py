@@ -99,6 +99,9 @@ async def verify_nonce(wallet_address: str, nonce: str) -> bool:
     created_at = result.get("created_at")
     if created_at:
         expiry_time = datetime.now(timezone.utc) - timedelta(minutes=NONCE_EXPIRY_MINUTES)
+        # Ensure both datetimes are timezone-aware for comparison
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
         if created_at < expiry_time:
             logger.warning(f"Nonce expired for {address_lower[:10]}...")
             return False
