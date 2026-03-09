@@ -44,8 +44,6 @@ validate_environment()
 app = FastAPI(
     title="Moon Hunters API",
     version="1.0.0",
-    docs_url=None,
-    redoc_url=None,
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -155,24 +153,6 @@ app.include_router(analytics.router)
 app.include_router(intelligence.router)
 app.include_router(invest.router)
 
-
-@app.get("/docs", include_in_schema=False)
-async def custom_swagger_ui():
-    from fastapi.responses import HTMLResponse
-    html = """<!DOCTYPE html>
-<html><head><title>Moon Hunters API</title><meta charset="utf-8"/>
-<link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.18.2/swagger-ui.css"/>
-</head><body>
-<div id="swagger-ui"></div>
-<script src="https://unpkg.com/swagger-ui-dist@5.18.2/swagger-ui-bundle.js"></script>
-<script src="https://unpkg.com/swagger-ui-dist@5.18.2/swagger-ui-standalone-preset.js"></script>
-<script>
-window.onload=function(){
-  SwaggerUIBundle({url:window.location.origin+'/openapi.json',dom_id:'#swagger-ui',deepLinking:true,
-  presets:[SwaggerUIBundle.presets.apis,SwaggerUIStandalonePreset],layout:'StandaloneLayout'});
-};
-</script></body></html>"""
-    return HTMLResponse(content=html)
 
 app.add_middleware(
     CORSMiddleware,
