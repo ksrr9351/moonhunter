@@ -85,8 +85,15 @@ def verify_wallet_signature(
     logger = logging.getLogger(__name__)
     
     try:
-        logger.info(f"[SIWE] Verifying signature for address: {address[:10]}...")
-        logger.info(f"[SIWE] Nonce provided: {nonce[:20]}...")
+        logger.info(f"[SIWE] ===== VERIFY_WALLET_SIGNATURE ENTRY =====")
+        logger.info(f"[SIWE]  address      : {address[:10]}...")
+        logger.info(f"[SIWE]  domain       : {domain}")
+        logger.info(f"[SIWE]  chain_id     : {chain_id}")
+        logger.info(f"[SIWE]  request_host : {request_host}")
+        logger.info(f"[SIWE]  request_origin: {request_origin}")
+        logger.info(f"[SIWE]  has_message  : {bool(message)}")
+        logger.info(f"[SIWE]  skip_nonce   : {skip_nonce_check}")
+        logger.info(f"[SIWE]  nonce        : {nonce[:20] if nonce else 'None'}...")
         
         if not skip_nonce_check:
             logger.warning(f"[SIWE] skip_nonce_check is False but in-memory nonce store removed. Nonce must be verified externally via nonce_store module.")

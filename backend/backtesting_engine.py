@@ -1,5 +1,4 @@
-"""
-Backtesting Engine for Moon Hunters
+"""Backtesting Engine for Moon Hunters
 Simulates trading strategies on REAL historical data from CoinGecko
 """
 

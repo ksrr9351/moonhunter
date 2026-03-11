@@ -1,8 +1,10 @@
 """
 Historical Data Provider for Moon Hunters Backtesting
 Uses CoinGecko API for free historical OHLC data
+Set COINGECKO_API_KEY env var for a free demo key (get one at coingecko.com/api)
 """
 
+import os
 import httpx
 import logging
 from typing import Dict, Any, List, Optional
@@ -60,13 +62,22 @@ class HistoricalDataProvider:
     
     def __init__(self):
         self.base_url = "https://api.coingecko.com/api/v3"
+        self.api_key = os.environ.get('COINGECKO_API_KEY', '')
         self.cache: Dict[str, Any] = {}
         self.cache_ttl = 7200  # Cache for 2 hours to reduce API calls
-        self.rate_limit_delay = 2.5  # Increased delay between requests (free tier: 30/min)
+        # With API key: 30 req/min → ~2s safe delay. Without: be more conservative
+        self.rate_limit_delay = 2.0 if self.api_key else 3.0
         self.last_request_time = 0
         self.retry_count = 0
         self.max_retries = 3
-        logger.info("Historical Data Provider initialized (CoinGecko)")
+        if self.api_key:
+            logger.info("Historical Data Provider initialized (CoinGecko with API key)")
+        else:
+            logger.warning(
+                "Historical Data Provider initialized WITHOUT CoinGecko API key. "
+                "Set COINGECKO_API_KEY env var for reliable data. "
+                "Get a free key at https://www.coingecko.com/en/api"
+            )
     
     def _get_coingecko_id(self, symbol: str) -> Optional[str]:
         """Convert CMC symbol to CoinGecko ID"""
@@ -120,6 +131,11 @@ class HistoricalDataProvider:
         
         await self._rate_limit()
         
+        # Build request headers — include API key when available
+        headers = {}
+        if self.api_key:
+            headers["x-cg-demo-api-key"] = self.api_key
+
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(
@@ -127,7 +143,8 @@ class HistoricalDataProvider:
                     params={
                         "vs_currency": "usd",
                         "days": str(api_days)
-                    }
+                    },
+                    headers=headers
                 )
                 
                 if response.status_code == 429:
@@ -140,6 +157,15 @@ class HistoricalDataProvider:
                     logger.warning(f"CoinGecko rate limit hit, waiting {wait_time}s (retry {self.retry_count}/{self.max_retries})...")
                     await asyncio.sleep(wait_time)
                     return await self.get_historical_ohlc(symbol, days)
+
+                if response.status_code in (401, 403):
+                    logger.error(
+                        f"CoinGecko auth error {response.status_code} for {symbol}. "
+                        f"Set COINGECKO_API_KEY env var with your free demo key "
+                        f"(get one at https://www.coingecko.com/en/api). "
+                        f"Falling back to /market_chart endpoint..."
+                    )
+                    return await self._get_ohlc_from_market_chart(coin_id, symbol, api_days, headers)
                 
                 response.raise_for_status()
                 raw_data = response.json()
@@ -155,6 +181,10 @@ class HistoricalDataProvider:
                             "low": float(item[3]),
                             "close": float(item[4])
                         })
+
+                if not candles:
+                    logger.warning(f"OHLC returned empty data for {symbol}, falling back to market_chart...")
+                    return await self._get_ohlc_from_market_chart(coin_id, symbol, api_days, headers)
                 
                 self.cache[cache_key] = {
                     "data": candles,
@@ -166,9 +196,69 @@ class HistoricalDataProvider:
                 
         except httpx.HTTPStatusError as e:
             logger.error(f"CoinGecko API error for {symbol}: {e}")
-            return []
+            return await self._get_ohlc_from_market_chart(coin_id, symbol, api_days, headers)
         except Exception as e:
             logger.error(f"Error fetching historical data for {symbol}: {e}")
+            return []
+
+    async def _get_ohlc_from_market_chart(
+        self,
+        coin_id: str,
+        symbol: str,
+        days: int,
+        headers: Dict[str, str]
+    ) -> List[Dict[str, Any]]:
+        """
+        Fallback: build synthetic OHLC candles from /coins/{id}/market_chart
+        which returns daily close prices and is more permissive on free tier.
+        """
+        cache_key = f"market_chart_{coin_id}_{days}"
+        if self._is_cache_valid(cache_key):
+            return self.cache[cache_key]["data"]
+
+        await self._rate_limit()
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    f"{self.base_url}/coins/{coin_id}/market_chart",
+                    params={"vs_currency": "usd", "days": str(days), "interval": "daily"},
+                    headers=headers
+                )
+                if response.status_code == 429:
+                    logger.warning(f"Rate limit on market_chart for {symbol}, skipping")
+                    return []
+                if response.status_code in (401, 403):
+                    logger.error(
+                        f"CoinGecko {response.status_code} on market_chart for {symbol}. "
+                        f"Please set COINGECKO_API_KEY. Get a FREE key at https://www.coingecko.com/en/api"
+                    )
+                    return []
+                response.raise_for_status()
+                data = response.json()
+                prices = data.get("prices", [])  # [[ts_ms, price], ...]
+                if not prices:
+                    return []
+
+                candles = []
+                for i, (ts, price) in enumerate(prices):
+                    open_price = prices[i - 1][1] if i > 0 else price
+                    candles.append({
+                        "timestamp": ts,
+                        "date": datetime.fromtimestamp(ts / 1000, tz=timezone.utc).strftime("%Y-%m-%d"),
+                        "open": float(open_price),
+                        "high": float(max(open_price, price)),
+                        "low": float(min(open_price, price)),
+                        "close": float(price)
+                    })
+
+                self.cache[cache_key] = {
+                    "data": candles,
+                    "timestamp": datetime.now(timezone.utc)
+                }
+                logger.info(f"Fetched {len(candles)} market_chart candles (fallback) for {symbol}")
+                return candles
+        except Exception as e:
+            logger.error(f"market_chart fallback also failed for {symbol}: {e}")
             return []
     
     async def get_daily_prices(

@@ -27,13 +27,18 @@ router = APIRouter(prefix="/api")
 @limiter.limit("30/minute")
 async def get_wallet_nonce(request: Request, nonce_request: WalletNonceRequest):
     """Generate nonce for wallet authentication (MongoDB-backed for multi-instance)"""
+    client_ip = request.headers.get('x-forwarded-for', request.client.host if request.client else 'unknown')
+    origin  = request.headers.get('origin', 'no-origin')
+    logger.info(f"[NONCE] Request from {client_ip} | origin={origin} | address={nonce_request.address[:10]}...")
     try:
         nonce = await generate_nonce(nonce_request.address)
+        logger.info(f"[NONCE] Generated nonce for {nonce_request.address[:10]}... | nonce={nonce[:15]}...")
         return {"nonce": nonce}
     except ValueError as e:
+        logger.warning(f"[NONCE] ValueError for {nonce_request.address[:10]}...: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to generate nonce: {str(e)}", exc_info=True)
+        logger.error(f"[NONCE] Failed to generate nonce: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to generate nonce")
 
 
@@ -41,18 +46,37 @@ async def get_wallet_nonce(request: Request, nonce_request: WalletNonceRequest):
 @limiter.limit("10/minute")
 async def verify_wallet(request: Request, verify_request: WalletVerifyRequest):
     """Verify wallet signature and create session using EIP-4361 SIWE"""
+    client_ip = request.headers.get('x-forwarded-for', request.client.host if request.client else 'unknown')
+    origin_header = request.headers.get('origin', 'no-origin')
+    request_host = request.headers.get('host', '')
+    host_no_port = request_host.split(':')[0]
+
+    logger.info(f"[VERIFY] ===== START =====")
+    logger.info(f"[VERIFY] address   : {verify_request.address[:10]}...")
+    logger.info(f"[VERIFY] client_ip : {client_ip}")
+    logger.info(f"[VERIFY] origin    : {origin_header}")
+    logger.info(f"[VERIFY] host      : {request_host} → stripped={host_no_port}")
+    logger.info(f"[VERIFY] client domain : {verify_request.domain}")
+    logger.info(f"[VERIFY] client chainId: {verify_request.chainId}")
+    logger.info(f"[VERIFY] nonce     : {verify_request.nonce[:15] if verify_request.nonce else 'None'}...")
+    logger.info(f"[VERIFY] signature : {verify_request.signature[:20] if verify_request.signature else 'None'}...")
+    if verify_request.message:
+        logger.info(f"[VERIFY] message (first 200 chars):\n{verify_request.message[:200]}")
+    else:
+        logger.warning(f"[VERIFY] No SIWE message provided!")
+
     try:
-        # Get request host for server-side domain binding
-        request_host = request.headers.get('host', '').split(':')[0]  # Remove port
-        origin_header = request.headers.get('origin', '')
-        
         # First verify the nonce using async MongoDB store
+        logger.info(f"[VERIFY] Checking nonce in MongoDB...")
         nonce_valid = await verify_nonce(verify_request.address, verify_request.nonce)
         if not nonce_valid:
+            logger.warning(f"[VERIFY] FAILED — nonce invalid/expired for {verify_request.address[:10]}...")
             raise HTTPException(status_code=401, detail="Invalid or expired nonce")
-        
+        logger.info(f"[VERIFY] Nonce OK")
+
         # Pass all SIWE parameters for proper verification with server-side host binding
         # Note: Nonce already verified above, so skip_nonce_check=True
+        logger.info(f"[VERIFY] Running signature verification (verify_wallet_signature)...")
         is_valid = verify_wallet_signature(
             address=verify_request.address,
             signature=verify_request.signature,
@@ -60,13 +84,15 @@ async def verify_wallet(request: Request, verify_request: WalletVerifyRequest):
             message=verify_request.message,
             domain=verify_request.domain,
             chain_id=verify_request.chainId,
-            request_host=request_host,
+            request_host=host_no_port,
             request_origin=origin_header,
             skip_nonce_check=True  # Already verified above
         )
         
         if not is_valid:
+            logger.warning(f"[VERIFY] FAILED — signature invalid for {verify_request.address[:10]}...")
             raise HTTPException(status_code=401, detail="Invalid signature")
+        logger.info(f"[VERIFY] Signature OK")
         
         wallet_address_lower = verify_request.address.lower()
         existing_user = await db.users.find_one(
@@ -86,10 +112,13 @@ async def verify_wallet(request: Request, verify_request: WalletVerifyRequest):
             }
             await db.users.insert_one(new_user)
             user_data = new_user
+            logger.info(f"[VERIFY] New user created: {wallet_address_lower[:10]}... username={new_user['username']}")
         else:
             user_data = existing_user
+            logger.info(f"[VERIFY] Existing user found: {wallet_address_lower[:10]}... username={existing_user.get('username')}")
         
         access_token = create_wallet_jwt(wallet_address_lower)
+        logger.info(f"[VERIFY] ===== SUCCESS — token issued for {wallet_address_lower[:10]}... =====")
         
         return {
             "success": True,
@@ -106,9 +135,10 @@ async def verify_wallet(request: Request, verify_request: WalletVerifyRequest):
     except HTTPException:
         raise
     except ValueError as e:
+        logger.error(f"[VERIFY] ValueError: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Verification failed: {str(e)}", exc_info=True)
+        logger.error(f"[VERIFY] Unexpected error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Verification failed")
 
 
