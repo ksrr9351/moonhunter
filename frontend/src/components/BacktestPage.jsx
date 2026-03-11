@@ -29,6 +29,7 @@ function BacktestPage() {
   const [periodDays, setPeriodDays] = useState(90);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState(null);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     fetchStrategies();
@@ -61,6 +62,8 @@ function BacktestPage() {
     if (!selectedStrategy) return;
     
     setLoading(true);
+    setError(null);
+    setResults(null);
     try {
       const endDate = new Date().toISOString();
       const startDate = new Date(Date.now() - periodDays * 24 * 60 * 60 * 1000).toISOString();
@@ -73,9 +76,14 @@ function BacktestPage() {
         endDate,
         params
       );
-      setResults(result);
-    } catch (error) {
-      console.error('Backtest failed:', error);
+      if (result.error) {
+        setError(result.error);
+      } else {
+        setResults(result);
+      }
+    } catch (err) {
+      console.error('Backtest failed:', err);
+      setError(err.message || 'Failed to run backtest. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -400,6 +408,17 @@ function BacktestPage() {
                       </div>
                     </div>
                   )}
+                </motion.div>
+              ) : error ? (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="premium-glass-card p-12 flex flex-col items-center justify-center text-center h-full min-h-[400px] border border-red-500/30"
+                >
+                  <AlertTriangle className="w-16 h-16 text-red-400/60 mb-4" />
+                  <h3 className="text-xl font-semibold text-red-400 mb-2">Backtest Failed</h3>
+                  <p className="text-gray-400 max-w-md">{error}</p>
+                  <p className="text-gray-500 text-sm mt-3">This usually means the data provider (CoinGecko) couldn't supply historical prices. Try again in a moment, or ask your admin to set the <span className="text-[#00FFD1] font-mono">COINGECKO_API_KEY</span> environment variable.</p>
                 </motion.div>
               ) : (
                 <motion.div

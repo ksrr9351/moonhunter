@@ -8,6 +8,29 @@ import { getChains, getChainById } from '../services/chainService';
 
 const API_URL = import.meta.env.VITE_BACKEND_URL || '';
 
+// ==================== GLOBAL AXIOS DEBUG INTERCEPTORS ====================
+axios.interceptors.request.use(config => {
+  console.log(`[AXIOS ➤] ${config.method?.toUpperCase()} ${config.url}`, { data: config.data });
+  return config;
+});
+axios.interceptors.response.use(
+  response => {
+    console.log(`[AXIOS ✓] ${response.status} ${response.config?.url}`, response.data);
+    return response;
+  },
+  error => {
+    console.error(`[AXIOS ✗] ${error.config?.url}`, {
+      status: error.response?.status,
+      data: error.response?.data,
+      code: error.code,
+      message: error.message
+    });
+    return Promise.reject(error);
+  }
+);
+
+console.log('[CONFIG] API_URL =', JSON.stringify(API_URL), '| window.origin =', window.location.origin);
+
 // Populated dynamically from /api/dex/chains on mount
 const DEFAULT_SUPPORTED_CHAINS = {};
 
@@ -32,16 +55,13 @@ export const WalletAuthProvider = ({ children }) => {
   const { chainId: reownChainId } = useAppKitNetwork();
 
   // ==================== GLOBAL AUTH STATE ====================
-  // FIX: Initialize from localStorage synchronously to prevent flash
-  const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    const hasAuth = !!localStorage.getItem('auth_token') && !!localStorage.getItem('wallet_address');
-    console.log('[INIT] Auth state initialized from localStorage:', hasAuth);
-    return hasAuth;
-  });
-  const [walletConnected, setWalletConnected] = useState(() => !!localStorage.getItem('wallet_address'));
-  const [walletAddress, setWalletAddress] = useState(() => localStorage.getItem('wallet_address') || '');
-  const [token, setToken] = useState(() => localStorage.getItem('auth_token') || '');
-  const [userId, setUserId] = useState(() => localStorage.getItem('user_id') || '');
+  // FIX: Start as unauthenticated — validateAuth() will confirm with backend
+  // This prevents "auth flash" when localStorage has a stale/expired token
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [walletConnected, setWalletConnected] = useState(false);
+  const [walletAddress, setWalletAddress] = useState('');
+  const [token, setToken] = useState('');
+  const [userId, setUserId] = useState('');
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [currentChainId, setCurrentChainId] = useState(null);
@@ -76,6 +96,9 @@ export const WalletAuthProvider = ({ children }) => {
   useEffect(() => {
     const validateAuth = async () => {
       console.log('[AUTH] Validating existing auth...');
+      
+      // Clean up any stale pending_siwe from previous interrupted sign attempts
+      sessionStorage.removeItem('pending_siwe');
       
       const savedToken = localStorage.getItem('auth_token');
       const savedWalletAddress = localStorage.getItem('wallet_address');
@@ -160,7 +183,29 @@ export const WalletAuthProvider = ({ children }) => {
       
       if (eventName === 'CONNECT_SUCCESS') {
         console.log('[REOWN EVENT] Connection successful! Closing modal...');
+        // Reset any stuck SIWE flow so the new connection can authenticate
+        loginInProgress.current = false;
         setTimeout(() => forceCloseModal(), 200);
+      }
+      
+      if (eventName === 'SIWX_AUTH_SUCCESS') {
+        // Reown completed its own SIWX authentication (e.g. Trust Wallet smart account)
+        const targetAddress = address;
+        console.log('[REOWN EVENT] SIWX_AUTH_SUCCESS — network:', event?.data?.properties?.network,
+          '| isSmartAccount:', event?.data?.properties?.isSmartAccount);
+        if (targetAddress && !isAuthenticated) {
+          console.log('[REOWN EVENT] Completing backend auth via direct connect for:', targetAddress.slice(0, 10) + '...');
+          // Reset stuck flags before calling backend
+          loginInProgress.current = false;
+          lastProcessedAddress.current = null;
+          setTimeout(() => {
+            if (!isAuthenticated && !loginInProgress.current) {
+              handleDirectConnect(targetAddress);
+            }
+          }, 400);
+        } else if (isAuthenticated) {
+          console.log('[REOWN EVENT] SIWX_AUTH_SUCCESS but already authenticated, ignoring');
+        }
       }
       
       if (eventName === 'CONNECT_ERROR' || eventName === 'MODAL_CLOSE') {
@@ -287,7 +332,7 @@ export const WalletAuthProvider = ({ children }) => {
       }
       
       // Clear any pending SIWE state (we use direct connect now)
-      localStorage.removeItem('pending_siwe');
+      sessionStorage.removeItem('pending_siwe');
       
       // If wallet is connected but no valid token, authenticate with SIWE
       console.log('[AUTO] Wallet connected after reload, starting SIWE authentication...');
@@ -358,7 +403,7 @@ export const WalletAuthProvider = ({ children }) => {
         console.log('[DIRECT] Authentication successful!');
 
         // Clear any pending SIWE state
-        localStorage.removeItem('pending_siwe');
+        sessionStorage.removeItem('pending_siwe');
         
         // Save to localStorage
         localStorage.setItem('auth_token', accessToken);
@@ -420,10 +465,13 @@ export const WalletAuthProvider = ({ children }) => {
     
     try {
       console.log('[SIWE] Starting Sign-In With Ethereum for:', walletAddr.slice(0, 10) + '...');
+      console.log('[SIWE] walletProvider:', !!walletProvider, '| currentChainId:', currentChainId);
+      console.log('[SIWE] window.location:', window.location.href);
 
       // Step 1: Request nonce from backend
-      console.log('[SIWE] Step 1: Requesting nonce from server...');
-      const nonceResponse = await axios.post(`${API_URL}/api/auth/wallet/nonce`, {
+      const nonceUrl = `${API_URL}/api/auth/wallet/nonce`;
+      console.log('[SIWE] Step 1: POST nonce to:', nonceUrl);
+      const nonceResponse = await axios.post(nonceUrl, {
         address: walletAddr
       }, { timeout: 10000 });
 
@@ -437,7 +485,8 @@ export const WalletAuthProvider = ({ children }) => {
       const domain = window.location.host;
       const origin = window.location.origin;
       const issuedAt = new Date().toISOString();
-      const chainId = currentChainId || 1; // Default to Ethereum mainnet
+      // Use reownChainId from hook (more current than React state), fallback to currentChainId
+      const chainId = (reownChainId ? Number(reownChainId) : null) || currentChainId || 1;
       
       // EIP-4361 SIWE message format
       const siweMessage = `${domain} wants you to sign in with your Ethereum account:
@@ -451,10 +500,12 @@ Chain ID: ${chainId}
 Nonce: ${nonce}
 Issued At: ${issuedAt}`;
       
-      console.log('[SIWE] Step 2: EIP-4361 SIWE message created');
+      console.log('[SIWE] Step 2: SIWE message fields:', { domain, origin, chainId, issuedAt });
+      console.log('[SIWE] Full SIWE message:\n' + siweMessage);
       
       // Store pending SIWE state in case of page reload (mobile wallet redirect)
-      localStorage.setItem('pending_siwe', JSON.stringify({
+      // Using sessionStorage so it auto-clears on tab close — prevents stale data
+      sessionStorage.setItem('pending_siwe', JSON.stringify({
         address: walletAddr,
         nonce: nonce,
         message: siweMessage,
@@ -463,7 +514,7 @@ Issued At: ${issuedAt}`;
         issuedAt: issuedAt,
         timestamp: Date.now()
       }));
-      console.log('[SIWE] Pending SIWE state saved to localStorage');
+      console.log('[SIWE] Pending SIWE state saved to sessionStorage');
 
       // Step 3: Wait for signer to be ready and sign the message
       console.log('[SIWE] Step 3: Requesting signature from wallet...');
@@ -526,8 +577,9 @@ Issued At: ${issuedAt}`;
       }
 
       // Step 4: Verify signature with backend (send full SIWE message for verification)
-      console.log('[SIWE] Step 4: Verifying signature with server...');
-      const verifyResponse = await axios.post(`${API_URL}/api/auth/wallet/verify`, {
+      const verifyUrl = `${API_URL}/api/auth/wallet/verify`;
+      console.log('[SIWE] Step 4: POST verify to:', verifyUrl);
+      const verifyResponse = await axios.post(verifyUrl, {
         address: walletAddr,
         signature: signature,
         nonce: nonce,
@@ -544,7 +596,7 @@ Issued At: ${issuedAt}`;
         console.log('[SIWE] Signature verified! Authentication successful!');
 
         // Clear pending SIWE state
-        localStorage.removeItem('pending_siwe');
+        sessionStorage.removeItem('pending_siwe');
         
         // Save to localStorage
         localStorage.setItem('auth_token', accessToken);
@@ -572,23 +624,30 @@ Issued At: ${issuedAt}`;
         throw new Error('Signature verification failed');
       }
     } catch (error) {
-      console.error('[SIWE] Authentication failed:', error.message);
+      console.error('[SIWE] ===== AUTH FAILED =====');
+      console.error('[SIWE] message:', error.message);
+      console.error('[SIWE] code:', error.code);
+      console.error('[SIWE] HTTP status:', error.response?.status);
+      console.error('[SIWE] response data:', JSON.stringify(error.response?.data));
+      console.error('[SIWE] request URL:', error.config?.url);
+      console.error('[SIWE] full error:', error);
+      console.error('[SIWE] ==========================');
       loginInProgress.current = false;
       lastProcessedAddress.current = null;
       
       // Clear pending SIWE state on error
-      localStorage.removeItem('pending_siwe');
+      sessionStorage.removeItem('pending_siwe');
       
       if (error.message?.includes('rejected') || error.message?.includes('denied')) {
         alert('Please sign the message in your wallet to authenticate.');
       } else if (error.response?.status === 401) {
-        alert('Signature verification failed. Please try again.');
+        alert(`Signature verification failed (401): ${JSON.stringify(error.response?.data)}`);
       } else if (error.response?.status === 500) {
-        alert('Server error. Please try again in a few moments.');
+        alert(`Server error (500): ${JSON.stringify(error.response?.data)}`);
       } else if (error.code === 'ERR_NETWORK' || error.code === 'ECONNABORTED') {
-        alert('Network error. Please check your connection and try again.');
+        alert(`Network error [${error.code}] — URL: ${error.config?.url} — Open browser console F12 for details.`);
       } else {
-        alert(error.message || 'Authentication failed. Please try again.');
+        alert(`Auth failed: ${error.message}\n\nOpen browser console (F12) for full details.`);
       }
       return false;
     }
