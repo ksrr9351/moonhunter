@@ -1,8 +1,10 @@
-"""Backtesting Engine for Moon Hunters
+"""
+Backtesting Engine for Moon Hunters
 Simulates trading strategies on REAL historical data from CoinGecko
 """
 
 import logging
+import os
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone, timedelta
 import math
@@ -57,6 +59,12 @@ class BacktestingEngine:
         else:
             return await self._backtest_dump_buy(initial_capital, start_dt, end_dt, days, params)
     
+    def _no_data_reason(self) -> str:
+        """Return a user-friendly reason when historical data is unavailable"""
+        if not os.environ.get('COINGECKO_API_KEY'):
+            return "No historical data available. COINGECKO_API_KEY is not configured — please set it in the environment."
+        return "No historical data available. CoinGecko API may be rate-limited or temporarily unavailable — try again shortly."
+
     async def _get_historical_prices(self, symbols: List[str], days: int) -> Dict[str, List[Dict]]:
         """Fetch real historical prices for multiple coins"""
         if not self.historical_provider:
@@ -114,7 +122,7 @@ class BacktestingEngine:
         historical_data = await self._get_historical_prices(symbols, days + 30)
         
         if not historical_data:
-            return self._empty_result("dump_buy", initial_capital, days, "No historical data available")
+            return self._empty_result("dump_buy", initial_capital, days, self._no_data_reason())
         
         capital = initial_capital
         peak_capital = initial_capital
@@ -289,7 +297,7 @@ class BacktestingEngine:
         historical_data = await self._get_historical_prices(symbols, days + trend_period + 30)
         
         if not historical_data:
-            return self._empty_result("trend_follow", initial_capital, days, "No historical data available")
+            return self._empty_result("trend_follow", initial_capital, days, self._no_data_reason())
         
         capital = initial_capital
         peak_capital = initial_capital
@@ -459,7 +467,7 @@ class BacktestingEngine:
         historical_data = await self._get_historical_prices(coins, days + 30)
         
         if not historical_data:
-            return self._empty_result("dca", initial_capital, days, "No historical data available")
+            return self._empty_result("dca", initial_capital, days, self._no_data_reason())
         
         remaining_capital = initial_capital
         trades = []
@@ -565,7 +573,7 @@ class BacktestingEngine:
         historical_data = await self._get_historical_prices(symbols, days + 30)
         
         if not historical_data:
-            return self._empty_result("momentum", initial_capital, days, "No historical data available")
+            return self._empty_result("momentum", initial_capital, days, self._no_data_reason())
         
         capital = initial_capital
         peak_capital = initial_capital

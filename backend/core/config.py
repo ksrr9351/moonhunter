@@ -17,6 +17,7 @@ REQUIRED_ENV_VARS = {
 
 OPTIONAL_ENV_VARS = {
     'CMC_API_KEY': 'CoinMarketCap API key (needed for live market data)',
+    'COINGECKO_API_KEY': 'CoinGecko API key (needed for backtesting historical data)',
     'PERPLEXITY_API_KEY': 'Perplexity AI API key (needed for AI recommendations)',
     'ONEINCH_API_KEY': '1inch DEX API key (needed for swaps)',
     'VAPID_PRIVATE_KEY': 'VAPID private key (needed for push notifications)',
