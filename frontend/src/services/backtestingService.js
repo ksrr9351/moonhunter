@@ -1,4 +1,4 @@
-const API_BASE = '/api';
+const API_BASE = `${import.meta.env.VITE_BACKEND_URL || ''}/api`;
 
 const getHeaders = (token) => ({
   'Content-Type': 'application/json',
